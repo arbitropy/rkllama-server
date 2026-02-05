@@ -36,4 +36,6 @@ uv run streamlit run streamlit-client.py
 ```
 
 ## TODO
-- Multimodal multiturn and multiimage chat doesn't seem to work. Regular multi turn works
+- Multimodal multiturn and multiimage chat doesn't seem to work. Regular multi turn works. Needs testing. 
+- Proper streaming doesn't work. Needs testing. 
+- Add rk35** related cpu freq setting script. 
