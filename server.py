@@ -65,13 +65,10 @@ TOKENIZER_PATH = config['model']['tokenizer_path']
 
 # Model metadata
 MODEL_ID = config['model']['id']
-MODEL_NAME = config['model']['name']
-MODEL_OWNED_BY = config['model']['owned_by']
 
 # Vision configuration
 IMG_SIZE = config['vision']['image_size']
 IMG_TOKENS = config['vision']['image_tokens']
-IMG_EMBED_DIM = config['vision'].get('embed_dim', None)  # Optional
 VISION_START_TOKEN = config['vision']['start_token']
 VISION_END_TOKEN = config['vision']['end_token']
 VISION_PAD_TOKEN = config['vision']['pad_token']
@@ -475,8 +472,7 @@ async def list_models():
             {
                 "id": MODEL_ID,
                 "object": "model",
-                "created": int(time.time()),
-                "owned_by": MODEL_OWNED_BY
+                "created": int(time.time())
             }
         ]
     }
@@ -488,8 +484,7 @@ async def retrieve_model(model: str):
     return {
         "id": MODEL_ID,
         "object": "model",
-        "created": int(time.time()),
-        "owned_by": MODEL_OWNED_BY
+        "created": int(time.time())
     }
 
 @app.post('/v1/chat/completions')

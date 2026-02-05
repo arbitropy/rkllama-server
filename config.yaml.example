@@ -33,12 +33,6 @@ model:
   # Model identifier (used in OpenAI API responses)
   id: "internvl3_5-2b"
   
-  # Display name
-  name: "InternVL 3.5 2B"
-  
-  # Owner/creator
-  owned_by: "opengvlab"
-  
   # Path to RKLLM model file
   llm_path: "models/internvl3_5_2b/internvl3_5-2b-instruct_w8a8_rk3588.rkllm"
   
@@ -54,9 +48,6 @@ vision:
   
   # Number of vision tokens per image
   image_tokens: 256
-  
-  # Vision embedding dimension (optional, model-specific)
-  # embed_dim: 2048  # Uncomment for models like Qwen3-VL
   
   # Vision token markers (model-specific)
   start_token: "<img>"
@@ -81,9 +72,8 @@ generation:
   n_keep: -1
   
   # ==========================================
-  # Sampling Parameters (OpenAI Compatible)
+  # Sampling Parameters 
   # ==========================================
-  # Note: These are defaults and can be overridden per request
   
   # Temperature for sampling (0.0 = deterministic, higher = more random)
   # Range: 0.0 to 2.0
@@ -102,11 +92,11 @@ generation:
   repeat_penalty: 1.1
   
   # Frequency penalty (penalize tokens based on frequency)
-  # Range: -2.0 to 2.0 (OpenAI compatible)
+  # Range: -2.0 to 2.0 
   frequency_penalty: 0.0
   
   # Presence penalty (penalize tokens that have appeared)
-  # Range: -2.0 to 2.0 (OpenAI compatible)
+  # Range: -2.0 to 2.0 
   presence_penalty: 0.0
   
   # ==========================================
@@ -137,26 +127,3 @@ advanced:
   
   # Use cross-attention (model-specific)
   use_cross_attn: 0
-
-# ==========================================
-# Alternative Model Configurations
-# ==========================================
-# Examples of other models - copy section above and modify paths/settings
-
-# Qwen3-VL 2B Example:
-# model:
-#   id: "qwen3-vl-2b"
-#   name: "Qwen3-VL 2B"
-#   owned_by: "qwen"
-#   llm_path: "models/qwen3-vl-2b-instruct_w8a8_rk3588/qwen3-vl-2b-instruct_w8a8_rk3588.rkllm"
-#   encoder_path: "models/qwen3-vl-2b-instruct_w8a8_rk3588/qwen3-vl-2b-instruct_w8a8_rk3588.rknn"
-#   tokenizer_path: "Qwen/Qwen3-VL-2b-Instruct"
-#
-# vision:
-#   image_size: 448
-#   image_tokens: 196
-#   embed_dim: 2048
-#   start_token: "<|vision_start|>"
-#   end_token: "<|vision_end|>"
-#   pad_token: "<|image_pad|>"
-#   placeholder: "<image>"
