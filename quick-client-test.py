@@ -1,11 +1,11 @@
+"""
+Quick test client using OpenAI Python library for RKNN-LLM server
+"""
 import base64
-import requests
-import json
-import sys
+from openai import OpenAI
 
 # --- Configuration ---
-SERVER_URL = "http://localhost:8080/v1/chat/completions"
-IMAGE_PATH = "1-crop.jpeg"  #
+IMAGE_PATH = "1-crop.jpeg"
 PROMPT = """
 You are an expert food quality analyst. Your task is to assess the amount of food in a cropped image of a food tray.
 
@@ -30,8 +30,15 @@ You are an expert food quality analyst. Your task is to assess the amount of foo
 [empty/low/medium/full/closed]
 </tray_state>
 """
+
 def test_vlm():
-    # 1. Encode the image to Base64
+    # Initialize OpenAI client with custom base URL
+    client = OpenAI(
+        base_url="http://localhost:8080/v1",
+        api_key="dummy"  # API key not required but library needs it
+    )
+    
+    # Encode the image to Base64
     try:
         with open(IMAGE_PATH, "rb") as f:
             b64_image = base64.b64encode(f.read()).decode('utf-8')
@@ -39,56 +46,35 @@ def test_vlm():
         print(f"Error: {IMAGE_PATH} not found.")
         return
 
-    # 2. Prepare the OpenAI-compatible payload
-    payload = {
-        "model": "rk-vlm",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}
-                    },
-                    {"type": "text", "text": PROMPT}
-                ]
-            }
-        ],
-        "stream": True
-    }
-
-    # 3. Send the request and process the stream
     print(f"\nPrompt: {PROMPT}")
     print("Response: ", end="", flush=True)
 
     try:
-        response = requests.post(SERVER_URL, json=payload, stream=True)
-        response.raise_for_status()
+        # Create chat completion using OpenAI library
+        response = client.chat.completions.create(
+            model="internvl3_5-2b",  # Can be any name, server accepts all
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}
+                        },
+                        {"type": "text", "text": PROMPT}
+                    ]
+                }
+            ],
+            stream=True
+        )
 
-        for line in response.iter_lines():
-            if line:
-                # Decode the line from bytes to string
-                line_str = line.decode('utf-8')
+        # Process streaming response
+        for chunk in response:
+            if chunk.choices[0].delta.content:
+                print(chunk.choices[0].delta.content, end='', flush=True)
 
-                # Handle the [DONE] signal
-                if line_str == "data: [DONE]":
-                    break
-
-                # Remove the "data: " prefix
-                if line_str.startswith("data: "):
-                    content_json = line_str[6:]
-                    try:
-                        data = json.loads(content_json)
-                        # Extract the text content from the delta
-                        content = data['choices'][0]['delta'].get('content', '')
-                        
-                        # Print the content word by word
-                        print(content, end='', flush=True)
-                    except json.JSONDecodeError:
-                        continue
-
-    except requests.exceptions.RequestException as e:
-        print(f"\nConnection Error: {e}")
+    except Exception as e:
+        print(f"\nError: {e}")
 
     print("\n\n[Finished]")
 

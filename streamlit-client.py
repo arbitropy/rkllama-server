@@ -1,8 +1,10 @@
+"""
+Streamlit multimodal chat client using OpenAI Python library
+"""
 import streamlit as st
-import requests
-import json
 import base64
 import logging
+from openai import OpenAI
 
 # ==========================================
 # Configuration & Setup
@@ -10,7 +12,11 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-API_URL = "http://localhost:8080/v1/chat/completions"
+# Initialize OpenAI client with custom base URL
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="dummy"  # API key not required but library needs it
+)
 
 st.set_page_config(page_title="RKNN Multimodal Chat", layout="centered")
 
@@ -116,25 +122,17 @@ if prompt := st.chat_input("Type a message...", accept_file="multiple", file_typ
                 api_messages.append({"role": "system", "content": system_prompt})
             api_messages.extend(st.session_state.messages)
 
-            payload = {
-                "messages": api_messages,
-                "stream": True,
-                "model": "rk-vlm"
-            }
+            # Use OpenAI client for streaming
+            response = client.chat.completions.create(
+                model="internvl3_5-2b",  # Can be any name
+                messages=api_messages,
+                stream=True
+            )
             
-            with requests.post(API_URL, json=payload, stream=True) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if line:
-                        decoded = line.decode('utf-8')
-                        if decoded.startswith("data: "):
-                            data_str = decoded[6:]
-                            if data_str.strip() == "[DONE]": break
-                            try:
-                                chunk = json.loads(data_str)["choices"][0].get("delta", {}).get("content", "")
-                                full_response += chunk
-                                response_placeholder.markdown(full_response + "▌")
-                            except: continue
+            for chunk in response:
+                if chunk.choices[0].delta.content:
+                    full_response += chunk.choices[0].delta.content
+                    response_placeholder.markdown(full_response + "▌")
             
             response_placeholder.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})

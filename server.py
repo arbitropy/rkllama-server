@@ -5,6 +5,8 @@ import threading
 import queue
 import json
 import base64
+import time
+import yaml
 from contextlib import asynccontextmanager
 
 # Set LD_LIBRARY_PATH for local RKNN library before importing RKNNLite
@@ -33,43 +35,59 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ==========================================
+# Configuration Loading
+# ==========================================
+def load_config(config_path="config.yaml"):
+    """Load YAML configuration file with validation"""
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        logger.info(f"Loaded configuration from {config_path}")
+        return config
+    except FileNotFoundError:
+        logger.critical(f"Config file not found: {config_path}")
+        logger.critical("Please create config.yaml from config.yaml.example")
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        logger.critical(f"Invalid YAML in config file: {e}")
+        sys.exit(1)
+
+# Load configuration
+config = load_config()
+
+# ==========================================
 # Configuration
 # ==========================================
-# # Qwen 3
-# LLM_MODEL_PATH = "models/qwen3-vl-2b-instruct_w8a8_rk3588/qwen3-vl-2b-instruct_w8a8_rk3588.rkllm"
-# ENC_MODEL_PATH = "models/qwen3-vl-2b-instruct_w8a8_rk3588/qwen3-vl-2b-instruct_w8a8_rk3588.rknn"
-# TOKENIZER_PATH = "Qwen/Qwen3-VL-2b-Instruct"
-# # Model Specific Settings
-# IMG_SIZE = 448
-# IMG_TOKENS = 196
-# IMG_EMBED_DIM = 2048
-# # Vision Token Configuration (model-specific)
-# VISION_START_TOKEN = "<|vision_start|>"
-# VISION_END_TOKEN = "<|vision_end|>"
-# VISION_PAD_TOKEN = "<|image_pad|>"
+# Extract configuration values
+LLM_MODEL_PATH = config['model']['llm_path']
+ENC_MODEL_PATH = config['model']['encoder_path']
+TOKENIZER_PATH = config['model']['tokenizer_path']
 
-# InternVL 3
-LLM_MODEL_PATH = "models/internvl3_5_2b/internvl3_5-2b-instruct_w8a8_rk3588.rkllm"
-ENC_MODEL_PATH = "models/internvl3_5_2b/internvl3_5-2b_vision_rk3588.rknn"
-TOKENIZER_PATH = "OpenGVLab/InternVL3_5-2b"
-# Model Specific Settings
-IMG_SIZE = 448
-IMG_TOKENS = 256
-# Vision Token Configuration (model-specific)
-VISION_START_TOKEN ="<img>"
-VISION_END_TOKEN = "</img>"
-VISION_PAD_TOKEN = "<IMG_CONTEXT>"
+# Model metadata
+MODEL_ID = config['model']['id']
+MODEL_NAME = config['model']['name']
+MODEL_OWNED_BY = config['model']['owned_by']
 
-# Library Configuration
-LIB_DIR = "./lib"
-RKLLM_LIB_PATH = os.path.join(LIB_DIR, "librkllmrt.so")
-RKNN_LIB_PATH = os.path.join(LIB_DIR, "librknnrt.so")
+# Vision configuration
+IMG_SIZE = config['vision']['image_size']
+IMG_TOKENS = config['vision']['image_tokens']
+IMG_EMBED_DIM = config['vision'].get('embed_dim', None)  # Optional
+VISION_START_TOKEN = config['vision']['start_token']
+VISION_END_TOKEN = config['vision']['end_token']
+VISION_PAD_TOKEN = config['vision']['pad_token']
+IMAGE_PLACEHOLDER = config['vision']['placeholder']
 
-TARGET_PLATFORM = "rk3588"  # 'rk3588' or 'rk3576'
-HOST_IP = "0.0.0.0"
-PORT = 8080
+# Library configuration
+RKLLM_LIB_PATH = config['libraries']['rkllm_path']
+RKNN_LIB_PATH = config['libraries']['rknn_path']
 
-IMAGE_PLACEHOLDER = "<image>"  # Used in user prompts
+# Server configuration
+TARGET_PLATFORM = config['platform']['type']
+HOST_IP = config['server']['host']
+PORT = config['server']['port']
+
+# Generation defaults
+GEN_CONFIG = config['generation']
 
 # ==========================================
 # C-Types Definitions
@@ -278,40 +296,48 @@ class LLMEngine:
         self.lock = threading.Lock()
         
         # --- Initialization Logic ---
+        # Initialize params from config defaults
         rkllm_param = RKLLMParam()
         rkllm_param.model_path = bytes(model_path, 'utf-8')
 
-        rkllm_param.max_context_len = 4096
-        rkllm_param.max_new_tokens = 512
-        rkllm_param.skip_special_token = True
-        rkllm_param.n_keep = -1
-        rkllm_param.top_k = 1
-        rkllm_param.top_p = 0.9
-        rkllm_param.temperature = 0.1
-        rkllm_param.repeat_penalty = 1.1
-        rkllm_param.frequency_penalty = 0.0
-        rkllm_param.presence_penalty = 0.0
+        rkllm_param.max_context_len = GEN_CONFIG['max_context_len']
+        rkllm_param.max_new_tokens = GEN_CONFIG['max_new_tokens']
+        rkllm_param.skip_special_token = GEN_CONFIG['skip_special_token']
+        rkllm_param.n_keep = GEN_CONFIG['n_keep']
+        rkllm_param.top_k = GEN_CONFIG['top_k']
+        rkllm_param.top_p = GEN_CONFIG['top_p']
+        rkllm_param.temperature = GEN_CONFIG['temperature']
+        rkllm_param.repeat_penalty = GEN_CONFIG['repeat_penalty']
+        rkllm_param.frequency_penalty = GEN_CONFIG['frequency_penalty']
+        rkllm_param.presence_penalty = GEN_CONFIG['presence_penalty']
 
-        rkllm_param.mirostat = 0
-        rkllm_param.mirostat_tau = 5.0
-        rkllm_param.mirostat_eta = 0.1
+        rkllm_param.mirostat = GEN_CONFIG['mirostat']
+        rkllm_param.mirostat_tau = GEN_CONFIG['mirostat_tau']
+        rkllm_param.mirostat_eta = GEN_CONFIG['mirostat_eta']
 
-        rkllm_param.is_async = False
+        rkllm_param.is_async = config['advanced']['is_async']
 
         rkllm_param.img_start = VISION_START_TOKEN.encode('utf-8')
         rkllm_param.img_end = VISION_END_TOKEN.encode('utf-8')
         rkllm_param.img_content = VISION_PAD_TOKEN.encode('utf-8')
 
-        rkllm_param.extend_param.base_domain_id = 0
-        rkllm_param.extend_param.embed_flash = 1
-        rkllm_param.extend_param.n_batch = 1
-        rkllm_param.extend_param.use_cross_attn = 0
+        # Extended parameters from config
+        rkllm_param.extend_param.base_domain_id = config['advanced']['base_domain_id']
+        rkllm_param.extend_param.embed_flash = config['advanced']['embed_flash']
+        rkllm_param.extend_param.n_batch = config['advanced']['n_batch']
+        rkllm_param.extend_param.use_cross_attn = config['advanced']['use_cross_attn']
         rkllm_param.extend_param.enabled_cpus_num = 4
         
-        if platform.lower() in ["rk3576", "rk3588"]:
-            rkllm_param.extend_param.enabled_cpus_mask = (1 << 4)|(1 << 5)|(1 << 6)|(1 << 7)
+        # CPU core configuration from config
+        if config['platform']['cpu_mode'] == 'auto':
+            # Auto-select based on platform
+            if platform.lower() in ["rk3576", "rk3588"]:
+                rkllm_param.extend_param.enabled_cpus_mask = (1 << 4)|(1 << 5)|(1 << 6)|(1 << 7)
+            else:
+                rkllm_param.extend_param.enabled_cpus_mask = (1 << 0)|(1 << 1)|(1 << 2)|(1 << 3)
         else:
-            rkllm_param.extend_param.enabled_cpus_mask = (1 << 0)|(1 << 1)|(1 << 2)|(1 << 3)
+            # Use manual mask from config
+            rkllm_param.extend_param.enabled_cpus_mask = config['platform']['cpu_mask_manual']
 
         self.cb_func = CALLBACK_TYPE(self._callback)
 
@@ -331,11 +357,14 @@ class LLMEngine:
         self.rkllm_run.argtypes = [RKLLM_Handle_t, ctypes.POINTER(RKLLMInput), ctypes.POINTER(RKLLMInferParam), ctypes.c_void_p]
         self.rkllm_run.restype = ctypes.c_int
         
-        # Setup Infer Params
+        # Setup Infer Params from config
         self.rkllm_infer_params = RKLLMInferParam()
         ctypes.memset(ctypes.byref(self.rkllm_infer_params), 0, ctypes.sizeof(RKLLMInferParam))
         self.rkllm_infer_params.mode = RKLLMInferMode.RKLLM_INFER_GENERATE
         self.rkllm_infer_params.keep_history = 0
+        
+        # Store default generation params (can be overridden per request)
+        self.default_params = GEN_CONFIG.copy()
         
         logger.info("LLM Engine initialized successfully")
 
@@ -437,13 +466,43 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+@app.get('/v1/models')
+async def list_models():
+    """OpenAI-compatible models list endpoint. Returns configured model, accepts any model name in requests."""
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": MODEL_ID,
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": MODEL_OWNED_BY
+            }
+        ]
+    }
+
+@app.get('/v1/models/{model}')
+async def retrieve_model(model: str):
+    """OpenAI-compatible model retrieval endpoint. Accepts any model name."""
+    # Accept any model name, return configured model
+    return {
+        "id": MODEL_ID,
+        "object": "model",
+        "created": int(time.time()),
+        "owned_by": MODEL_OWNED_BY
+    }
+
 @app.post('/v1/chat/completions')
 async def chat_completions(request: Request):
+    """OpenAI-compatible chat completions endpoint with streaming support"""
     try:
         data = await request.json()
         logger.info(f"Received request from {request.client.host}")
         
+        # Parse OpenAI request parameters 
         messages = data.get('messages', [])
+        # NOTE: Generation params and model name params aren't used from the request, they are hardcoded in config.
+        
         image_list = []  # Collect all images in order
         
         # Convert OpenAI messages to HuggingFace format and extract images
@@ -502,23 +561,44 @@ async def chat_completions(request: Request):
                 raise HTTPException(status_code=500, detail="Vision model failure")
 
         def generate_stream():
-            """Synchronous generator wrapper for StreamingResponse"""
+            """Generate OpenAI-compatible streaming response"""
             generated_text = ""
-            # llm_model.infer is a sync generator, StreamingResponse will run it in a threadpool
+            chunk_id = f"chatcmpl-{int(time.time())}"
+            created_time = int(time.time())
+            
+            # Stream tokens from LLM
             for token in llm_model.infer(prompt_text, embeddings, n_images):
                 generated_text += token
                 chunk = {
-                    "id": "chatcmpl-rk",
+                    "id": chunk_id,
                     "object": "chat.completion.chunk",
-                    "created": 0,
-                    "model": "rk-vlm",
+                    "created": created_time,
+                    "model": MODEL_ID,
                     "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}]
                 }
                 yield f"data: {json.dumps(chunk)}\n\n"
             
-            logger.info(f"Response complete. Total length: {len(generated_text)}")
-            end_chunk = {"id": "chatcmpl-rk", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
-            yield f"data: {json.dumps(end_chunk)}\n\n[DONE]"
+            # Final chunk with finish reason and usage stats
+            logger.info(f"Generation complete. Output tokens (approx): {len(generated_text.split())}")
+            
+            # Approximate token counts (simple word-based estimation)
+            prompt_tokens = len(prompt_text.split()) + (n_images * IMG_TOKENS)
+            completion_tokens = len(generated_text.split())
+            
+            end_chunk = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created_time,
+                "model": MODEL_ID,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens
+                }
+            }
+            yield f"data: {json.dumps(end_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
 
         return StreamingResponse(generate_stream(), media_type='text/event-stream')
 

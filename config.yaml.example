@@ -1,0 +1,162 @@
+# ==========================================
+# RKNN-LLM Server Configuration
+# ==========================================
+# Copy this file to config.yaml and adjust settings as needed
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+
+platform:
+  # Hardware platform: rk3588, rk3576, or other
+  type: "rk3588"
+  
+  # CPU configuration - cores to use for inference
+  # auto: automatically select cores based on platform
+  # manual: specify exact cores (see cpu_mask_manual)
+  cpu_mode: "auto"
+  
+  # Manual CPU core mask (only used if cpu_mode: manual)
+  # Format: bitmask for cores 0-7
+  # Example: 0xF0 = cores 4-7 = (1<<4)|(1<<5)|(1<<6)|(1<<7)
+  cpu_mask_manual: 0xF0
+
+libraries:
+  # Path to RKLLM runtime library
+  rkllm_path: "./lib/librkllmrt.so"
+  
+  # Path to RKNN runtime library
+  rknn_path: "./lib/librknnrt.so"
+
+model:
+  # Model identifier (used in OpenAI API responses)
+  id: "internvl3_5-2b"
+  
+  # Display name
+  name: "InternVL 3.5 2B"
+  
+  # Owner/creator
+  owned_by: "opengvlab"
+  
+  # Path to RKLLM model file
+  llm_path: "models/internvl3_5_2b/internvl3_5-2b-instruct_w8a8_rk3588.rkllm"
+  
+  # Path to RKNN vision encoder model file
+  encoder_path: "models/internvl3_5_2b/internvl3_5-2b_vision_rk3588.rknn"
+  
+  # HuggingFace tokenizer path (or local path)
+  tokenizer_path: "OpenGVLab/InternVL3_5-2b"
+
+vision:
+  # Image preprocessing size
+  image_size: 448
+  
+  # Number of vision tokens per image
+  image_tokens: 256
+  
+  # Vision embedding dimension (optional, model-specific)
+  # embed_dim: 2048  # Uncomment for models like Qwen3-VL
+  
+  # Vision token markers (model-specific)
+  start_token: "<img>"
+  end_token: "</img>"
+  pad_token: "<IMG_CONTEXT>"
+  
+  # Placeholder used in user prompts
+  placeholder: "<image>"
+
+generation:
+  # Maximum context length (input + output tokens)
+  max_context_len: 4096
+  
+  # Maximum number of new tokens to generate
+  # Note: Can be overridden by max_tokens in API request
+  max_new_tokens: 512
+  
+  # Skip special tokens in output
+  skip_special_token: true
+  
+  # Number of tokens to keep from prompt (do not modify)
+  n_keep: -1
+  
+  # ==========================================
+  # Sampling Parameters (OpenAI Compatible)
+  # ==========================================
+  # Note: These are defaults and can be overridden per request
+  
+  # Temperature for sampling (0.0 = deterministic, higher = more random)
+  # Range: 0.0 to 2.0
+  temperature: 0.1
+  
+  # Nucleus sampling threshold
+  # Range: 0.0 to 1.0
+  top_p: 0.9
+  
+  # Top-k sampling (number of top tokens to consider)
+  # Set to 1 for greedy decoding
+  top_k: 1
+  
+  # Repetition penalty (penalize repeated tokens)
+  # 1.0 = no penalty, higher = stronger penalty
+  repeat_penalty: 1.1
+  
+  # Frequency penalty (penalize tokens based on frequency)
+  # Range: -2.0 to 2.0 (OpenAI compatible)
+  frequency_penalty: 0.0
+  
+  # Presence penalty (penalize tokens that have appeared)
+  # Range: -2.0 to 2.0 (OpenAI compatible)
+  presence_penalty: 0.0
+  
+  # ==========================================
+  # Advanced Sampling (Mirostat)
+  # ==========================================
+  
+  # Mirostat sampling mode (0 = disabled, 1 or 2 = enabled)
+  mirostat: 0
+  
+  # Mirostat target entropy
+  mirostat_tau: 5.0
+  
+  # Mirostat learning rate
+  mirostat_eta: 0.1
+
+advanced:
+  # Asynchronous processing
+  is_async: false
+  
+  # Base domain ID for RKNN
+  base_domain_id: 0
+  
+  # Embed flash optimization
+  embed_flash: 1
+  
+  # Batch size
+  n_batch: 1
+  
+  # Use cross-attention (model-specific)
+  use_cross_attn: 0
+
+# ==========================================
+# Alternative Model Configurations
+# ==========================================
+# Examples of other models - copy section above and modify paths/settings
+
+# Qwen3-VL 2B Example:
+# model:
+#   id: "qwen3-vl-2b"
+#   name: "Qwen3-VL 2B"
+#   owned_by: "qwen"
+#   llm_path: "models/qwen3-vl-2b-instruct_w8a8_rk3588/qwen3-vl-2b-instruct_w8a8_rk3588.rkllm"
+#   encoder_path: "models/qwen3-vl-2b-instruct_w8a8_rk3588/qwen3-vl-2b-instruct_w8a8_rk3588.rknn"
+#   tokenizer_path: "Qwen/Qwen3-VL-2b-Instruct"
+#
+# vision:
+#   image_size: 448
+#   image_tokens: 196
+#   embed_dim: 2048
+#   start_token: "<|vision_start|>"
+#   end_token: "<|vision_end|>"
+#   pad_token: "<|image_pad|>"
+#   placeholder: "<image>"

@@ -1,5 +1,5 @@
 # RKLLAMA-SERVER
-This library lets you quickly create an OpenAI /completions endpoint compatible server with rkllm and rknn(for vision support) inferencing support. 
+This library lets you quickly create an OpenAI `/v1/chat/completions/` and `/v1/models/` endpoint compatible server with rkllm and rknn(for vision support) inferencing support. 
 
 ## Requirements
 1. rk3588/rk3576 processor (Currently only tested on rk3588, should work on rk3576)
@@ -37,6 +37,3 @@ uv run streamlit run streamlit-client.py
 
 ## TODO
 - Multimodal multiturn and multiimage chat doesn't seem to work. Regular multi turn works
-- /models and /completions api full spec support
-- Implement config.yaml
-- client using openai python
