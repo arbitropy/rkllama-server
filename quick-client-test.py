@@ -5,31 +5,8 @@ import base64
 from openai import OpenAI
 
 # --- Configuration ---
-IMAGE_PATH = "1-crop.jpeg"
-PROMPT = """
-You are an expert food quality analyst. Your task is to assess the amount of food in a cropped image of a food tray.
-
-### INSTRUCTIONS:
-1. **Analyze Content:** Identify the type of food present. Is it a solid (e.g., rice, chicken), a liquid (e.g., soup, sauce), or a mix?
-2. **Estimate Volume:** Compare the current amount of food to the total capacity of the tray compartment.
-3. **Determine State:** Select the most accurate state from the definitions below:
-   - **empty:** 0% food; the tray surface is completely visible.
-   - **low:** Less than 25% full; only a small portion or scrap remains.
-   - **medium:** 25% to 75% full; clearly used but contains a significant portion.
-   - **full:** More than 75% full; the tray appears nearly or completely filled.
-   - **closed:** A lid or cover is on the tray, making it impossible to see the food.
-
-### OUTPUT FORMAT:
-<reasoning>
-- Food Type: [Solid/Liquid/Mixed]
-- Observations: [Briefly describe the food and how much of the tray bottom is visible]
-- Logic: [Explain why the food level matches the selected category]
-</reasoning>
-
-<tray_state>
-[empty/low/medium/full/closed]
-</tray_state>
-"""
+IMAGE_PATH = "demo.jpeg"
+PROMPT = """Describe the image."""
 
 def test_vlm():
     # Initialize OpenAI client with custom base URL
