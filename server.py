@@ -1,22 +1,3 @@
-"""
-Multimodal LLM Server with HuggingFace Chat Template Integration
-
-This server combines:
-- RKNN-accelerated vision encoder for image embeddings
-- RKNN-accelerated LLM for text generation  
-- HuggingFace tokenizer for proper chat formatting
-
-Key Features:
-- OpenAI-compatible API endpoint (/v1/chat/completions)
-- Automatic chat template application from tokenizer
-- Streaming responses with Server-Sent Events
-- Multimodal support (text + image)
-
-Configuration:
-- Update model paths and vision tokens at top of file
-- Tokenizer must have chat_template or server will fail
-- Vision tokens must match model training data
-"""
 import ctypes
 import os
 import sys
@@ -24,6 +5,7 @@ import threading
 import queue
 import json
 import base64
+from contextlib import asynccontextmanager
 
 # Set LD_LIBRARY_PATH for local RKNN library before importing RKNNLite
 LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
@@ -34,7 +16,9 @@ if os.path.exists(LIB_DIR):
 import cv2
 import numpy as np
 import logging
-from flask import Flask, request, Response, jsonify
+import uvicorn
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import StreamingResponse
 from rknnlite.api import RKNNLite
 from transformers import AutoTokenizer
 
@@ -189,7 +173,7 @@ class RKLLMInput(ctypes.Structure):
     _fields_ = [
         ("role", ctypes.c_char_p),
         ("enable_thinking", ctypes.c_bool),
-        ("input_type", ctypes.c_int), # RKLLMInputType
+        ("input_type", ctypes.c_int),
         ("input_data", RKLLMInputUnion)
     ]
 
@@ -280,7 +264,7 @@ class VisionEncoder:
         return embeddings
 
 # ==========================================
-# LLM Engine (Updated to match flask_server.py)
+# LLM Engine
 # ==========================================
 class LLMEngine:
     def __init__(self, model_path, platform="rk3588"):
@@ -293,7 +277,7 @@ class LLMEngine:
         self.q = queue.Queue()
         self.lock = threading.Lock()
         
-        # --- Initialization Logic from flask_server.py ---
+        # --- Initialization Logic ---
         rkllm_param = RKLLMParam()
         rkllm_param.model_path = bytes(model_path, 'utf-8')
 
@@ -331,7 +315,7 @@ class LLMEngine:
 
         self.cb_func = CALLBACK_TYPE(self._callback)
 
-        # Explicitly define argtypes and restype (Crucial for stability)
+        # Explicitly define argtypes and restype
         self.rkllm_init = rkllm_lib.rkllm_init
         self.rkllm_init.argtypes = [ctypes.POINTER(RKLLM_Handle_t), ctypes.POINTER(RKLLMParam), CALLBACK_TYPE]
         self.rkllm_init.restype = ctypes.c_int
@@ -369,21 +353,21 @@ class LLMEngine:
             logger.error(f"Callback exception: {e}")
         return 0
 
-    def infer(self, prompt, image_embeds=None):
+    def infer(self, prompt, image_embeds=None, n_images=0):
         with self.lock:
-            logger.info(f"Starting inference. Prompt len: {len(prompt)}. Has Image: {image_embeds is not None}")
+            logger.info(f"Starting inference. Prompt len: {len(prompt)}. Images: {n_images}")
             
             inp = RKLLMInput()
             inp.role = b"user"
             inp.enable_thinking = False
             
-            if image_embeds is not None:
+            if image_embeds is not None and n_images > 0:
                 inp.input_type = RKLLMInputType.RKLLM_INPUT_MULTIMODAL
                 mm = inp.input_data.multimodal_input
                 mm.prompt = prompt.encode('utf-8')
                 mm.image_embed = image_embeds.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
                 mm.n_image_tokens = IMG_TOKENS
-                mm.n_image = 1
+                mm.n_image = n_images  # Dynamic image count
                 mm.image_width = IMG_SIZE
                 mm.image_height = IMG_SIZE
             else:
@@ -403,21 +387,64 @@ class LLMEngine:
                 yield token
 
 # ==========================================
-# Flask Server
+# FastAPI Server
 # ==========================================
-app = Flask(__name__)
 
+# Global model placeholders
 vision_model = None
 llm_model = None
+tokenizer = None
 
-@app.route('/v1/chat/completions', methods=['POST'])
-def chat_completions():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager to handle model loading on startup
+    and cleanup on shutdown.
+    """
+    global vision_model, llm_model, tokenizer
     try:
-        data = request.json
-        logger.info(f"Received request from {request.remote_addr}")
+        # Initialize Tokenizer
+        logger.info("--------------------------------")
+        logger.info(f"Loading tokenizer from: {TOKENIZER_PATH}")
+        tokenizer = AutoTokenizer.from_pretrained(
+            TOKENIZER_PATH,
+            trust_remote_code=True,
+            use_fast=False
+        )
+        if not hasattr(tokenizer, 'chat_template') or tokenizer.chat_template is None:
+            logger.critical("Tokenizer has no chat_template. Cannot proceed.")
+            sys.exit(1)
+        logger.info("Tokenizer loaded successfully")
+        
+        # Initialize LLM
+        logger.info("--------------------------------")
+        logger.info(f"Loading LLM from: {LLM_MODEL_PATH}")
+        llm_model = LLMEngine(LLM_MODEL_PATH, TARGET_PLATFORM)
+        
+        # Initialize Encoder
+        logger.info("--------------------------------")
+        logger.info(f"Loading Encoder from: {ENC_MODEL_PATH}")
+        vision_model = VisionEncoder(ENC_MODEL_PATH)
+        logger.info("--------------------------------")
+        
+        yield # Server runs here
+        
+    except Exception as e:
+        logger.critical(f"Startup failed: {e}")
+        sys.exit(1)
+    finally:
+        logger.info("Shutting down...")
+
+app = FastAPI(lifespan=lifespan)
+
+@app.post('/v1/chat/completions')
+async def chat_completions(request: Request):
+    try:
+        data = await request.json()
+        logger.info(f"Received request from {request.client.host}")
         
         messages = data.get('messages', [])
-        img_bytes = None
+        image_list = []  # Collect all images in order
         
         # Convert OpenAI messages to HuggingFace format and extract images
         hf_messages = []
@@ -426,29 +453,25 @@ def chat_completions():
             content = msg['content']
             
             if isinstance(content, list):
-                # Multimodal message - extract text and image
-                text_parts = []
+                # Multimodal message - preserve native content structure for tokenizer
+                processed_content = []
                 for item in content:
                     if item['type'] == 'text':
-                        text_parts.append(item['text'])
+                        processed_content.append({"type": "text", "text": item['text']})
                     elif item['type'] == 'image_url':
-                        logger.info("Found image in request")
                         try:
                             url = item['image_url']['url']
-                            if "base64," in url:
-                                b64 = url.split("base64,")[-1]
-                            else:
-                                b64 = url
+                            b64 = url.split("base64,")[-1] if "base64," in url else url
                             img_bytes = base64.b64decode(b64)
+                            image_list.append(img_bytes)
+                            # Add image marker for tokenizer
+                            processed_content.append({"type": "image"})
+                            logger.info(f"Extracted image {len(image_list)}")
                         except Exception as e:
                             logger.error(f"Base64 decode failed: {e}")
-                            return jsonify({"error": "Invalid image data"}), 400
+                            raise HTTPException(status_code=400, detail="Invalid image data")
                 
-                # Insert image placeholder before text for VLM
-                text_content = " ".join(text_parts)
-                if img_bytes:
-                    text_content = f"{IMAGE_PLACEHOLDER}{text_content}"
-                hf_messages.append({"role": role, "content": text_content})
+                hf_messages.append({"role": role, "content": processed_content})
             else:
                 # Text-only message
                 hf_messages.append({"role": role, "content": content})
@@ -460,23 +483,29 @@ def chat_completions():
                 tokenize=False, 
                 add_generation_prompt=True
             )
-            logger.info(f"Formatted prompt length: {len(prompt_text)}")
+            logger.info(f"Formatted prompt length: {len(prompt_text)}, images: {len(image_list)}")
         except Exception as e:
             logger.error(f"Chat template application failed: {e}")
-            return jsonify({"error": "Chat template error"}), 500
+            raise HTTPException(status_code=500, detail="Chat template error")
         
-        # Encode image if present
+        # Encode and concatenate all image embeddings
         embeddings = None
-        if img_bytes:
+        n_images = len(image_list)
+        if n_images > 0:
             try:
-                embeddings = vision_model.encode(img_bytes)
+                embed_list = [vision_model.encode(img) for img in image_list]
+                # Concatenate: [img1_tokens..., img2_tokens..., imgN_tokens...]
+                embeddings = np.concatenate(embed_list, axis=0)
+                logger.info(f"Encoded {n_images} images, total embed shape: {embeddings.shape}")
             except Exception as e:
                 logger.error(f"Vision encoding failed: {e}")
-                return jsonify({"error": "Vision model failure"}), 500
+                raise HTTPException(status_code=500, detail="Vision model failure")
 
-        def generate():
+        def generate_stream():
+            """Synchronous generator wrapper for StreamingResponse"""
             generated_text = ""
-            for token in llm_model.infer(prompt_text, embeddings):
+            # llm_model.infer is a sync generator, StreamingResponse will run it in a threadpool
+            for token in llm_model.infer(prompt_text, embeddings, n_images):
                 generated_text += token
                 chunk = {
                     "id": "chatcmpl-rk",
@@ -491,41 +520,14 @@ def chat_completions():
             end_chunk = {"id": "chatcmpl-rk", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
             yield f"data: {json.dumps(end_chunk)}\n\n[DONE]"
 
-        return Response(generate(), mimetype='text/event-stream')
+        return StreamingResponse(generate_stream(), media_type='text/event-stream')
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Unhandled server error")
-        return jsonify({"error": "Internal Server Error"}), 500
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 if __name__ == "__main__":
-    try:
-        # Initialize Tokenizer FIRST
-        logger.info("--------------------------------")
-        logger.info(f"Loading tokenizer from: {TOKENIZER_PATH}")
-        tokenizer = AutoTokenizer.from_pretrained(
-            TOKENIZER_PATH,
-            trust_remote_code=True,
-            use_fast=False
-        )
-        if not hasattr(tokenizer, 'chat_template') or tokenizer.chat_template is None:
-            logger.critical("Tokenizer has no chat_template. Cannot proceed.")
-            sys.exit(1)
-        logger.info("Tokenizer loaded successfully")
-        
-        # Initialize LLM SECOND (Resource Heavy)
-        logger.info("--------------------------------")
-        logger.info(f"Loading LLM from: {LLM_MODEL_PATH}")
-        llm_model = LLMEngine(LLM_MODEL_PATH, TARGET_PLATFORM)
-        
-        # Initialize Encoder THIRD
-        logger.info("--------------------------------")
-        logger.info(f"Loading Encoder from: {ENC_MODEL_PATH}")
-        vision_model = VisionEncoder(ENC_MODEL_PATH)
-        logger.info("--------------------------------")
-
-    except Exception as e:
-        logger.critical(f"Startup failed: {e}")
-        sys.exit(1)
-
-    logger.info(f"Starting Flask Server on {HOST_IP}:{PORT}")
-    app.run(host=HOST_IP, port=PORT, threaded=True)
+    logger.info(f"Starting FastAPI Server on {HOST_IP}:{PORT}")
+    uvicorn.run(app, host=HOST_IP, port=PORT, log_config=None)
