@@ -18,7 +18,7 @@ git clone https://github.com/arbitropy/rkllama-server.git
 cd rkllama-server
 ```
 ### Configuration
-Download the `<model>.rkllm` and optionally `<model-vision.rknn>` files. (TODO: Provide links for preconverted models)
+Download the `<model>.rkllm` and optionally `<model-vision>.rknn` files. (TODO: Provide links for preconverted models)
 Edit `config.yaml.example` into `config.yaml` and setup the model path, huggingface path(for tokenizer) and generation parameters inside the config file.
 Setting the vision special tokens is mandatory for VLMs.
 
