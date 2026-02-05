@@ -41,14 +41,10 @@ def test_vlm():
                         {"type": "text", "text": PROMPT}
                     ]
                 }
-            ],
-            stream=True
+            ]
         )
 
-        # Process streaming response
-        for chunk in response:
-            if chunk.choices[0].delta.content:
-                print(chunk.choices[0].delta.content, end='', flush=True)
+        print(response.choices[0].message.content)
 
     except Exception as e:
         print(f"\nError: {e}")

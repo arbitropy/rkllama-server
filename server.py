@@ -555,6 +555,9 @@ async def chat_completions(request: Request):
                 logger.error(f"Vision encoding failed: {e}")
                 raise HTTPException(status_code=500, detail="Vision model failure")
 
+        # Get stream parameter from request (default to False)
+        stream = data.get('stream', False)
+        
         def generate_stream():
             """Generate OpenAI-compatible streaming response"""
             generated_text = ""
@@ -595,7 +598,44 @@ async def chat_completions(request: Request):
             yield f"data: {json.dumps(end_chunk)}\n\n"
             yield "data: [DONE]\n\n"
 
-        return StreamingResponse(generate_stream(), media_type='text/event-stream')
+        if stream:
+            return StreamingResponse(generate_stream(), media_type='text/event-stream')
+        else:
+            # Non-streaming mode: collect all tokens and return as single response
+            generated_text = ""
+            chunk_id = f"chatcmpl-{int(time.time())}"
+            created_time = int(time.time())
+            
+            for token in llm_model.infer(prompt_text, embeddings, n_images):
+                generated_text += token
+            
+            logger.info(f"Generation complete. Output tokens (approx): {len(generated_text.split())}")
+            
+            # Approximate token counts
+            prompt_tokens = len(prompt_text.split()) + (n_images * IMG_TOKENS)
+            completion_tokens = len(generated_text.split())
+            
+            return {
+                "id": chunk_id,
+                "object": "chat.completion",
+                "created": created_time,
+                "model": MODEL_ID,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": generated_text
+                        },
+                        "finish_reason": "stop"
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens
+                }
+            }
 
     except HTTPException:
         raise
